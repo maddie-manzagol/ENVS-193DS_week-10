@@ -1,0 +1,173 @@
+---
+title: "Coding workshop: Week 10"
+author: "your name here"
+format:
+  html:
+    toc: true
+    toc-location: left
+    code-fold: true
+execute:
+  message: false
+  warning: false
+---
+
+```{r set-up}
+# model packages
+library(MASS) # have to read this in before tidyverse 
+library(lme4)
+library(glmmTMB) # ok if you don't have this - just comment it out
+
+# diagnostics and model info
+library(DHARMa)
+library(MuMIn)
+library(ggeffects)
+library(lmtest)
+library(broom)
+
+# general usage
+library(tidyverse)
+library(here)
+library(naniar)
+library(skimr)
+library(GGally)
+library(flextable)
+
+salamanders <- read_csv(here("data", "salamanders.csv"))
+```
+
+# Data info from `glmmTMB`:
+
+`site`: name of a location where repeated samples were taken  
+`mined`: factor indicating whether the site was affected by mountain top removal coal mining  
+`cover`: amount of cover objects in the stream (scaled)  
+`sample`: repeated sample  
+`DOP`: Days since precipitation (scaled)  
+`Wtemp`: water temperature (scaled)  
+`DOY`: day of year (scaled)  
+`spp`: abbreviated species name, possibly also life stage  
+`count`: number of salamanders observed  
+
+# Explore the data set:
+
+## histogram of counts:
+
+```{r histogram}
+ggplot(data= salamanders, aes(x=count))+
+  geom_histogram(bins=17)
+```
+
+## Missingness:
+
+```{r missingness}
+gg_miss_var(salamanders)
+```
+
+## Skim: 
+
+```{r skim-dataset}
+skim(salamanders)
+```
+
+## Pairs plot:  
+
+```{r pairs-plot}
+#| fig.width: 12
+#| fig.height: 12
+#| out.width: 90%
+#| fig.align: center
+
+salamanders %>% 
+  #take out the site column
+  select(!site) %>% 
+  ggpairs()
+```
+
+# Question: How does salamander count vary with mined status, species, and stream cover?
+
+## Build models
+
+```{r models}
+# linear model, we know this is wrong (because the data is not continuously distributed--this data is count/discrete: we are still doing this to show how it doesn't work)
+salmad1 <- lm(count ~ cover + spp + mined, data= salamanders)
+
+# generalized linear model with Poisson distribution (assumption that the mean of the assumes values is equal to the variance)
+salmad2 <- glm(count ~ count + mined + spp, data = salamanders, family = "poisson")
+
+# generalized linear model with negative binomial distribution (mean = mean, variance = mean divided by K or something (variance is greater than the mean)--> notes from this week)
+salmad3 <- glm.nb(count ~ cover + mined + spp, data = salamanders)
+
+# generalized linear model with Poisson distribution and random effect of site
+
+
+# generalized linear model with negative binomial distribution and random effect of site
+
+```
+
+## Look at residuals
+
+```{r model-residuals}
+#| fig.height: 6
+#| fig.width: 8
+#| fig.align: center
+
+# check diagnostics, resid v predict is synonomus to the resid v fitted 
+simulateResiduals(salmad1, plot = TRUE) #this looks bad, overdispersed 
+simulateResiduals(salmad2, plot = TRUE) #looks better than last plot, qq plot looks bad, over dispersed and outliers 
+simulateResiduals(salmad3, plot = TRUE) #much better, residuals conform to uniform distribution, no sig problems detected ---> negative bionomial is likely the best fit 
+```
+
+## Which distribution to use?
+
+```{r choosing-model}
+model.sel(salmad1, salmad2, salmad3)
+#minded and spp are categorical (+)
+#cover is continuous (number)
+#the weight-=1 indicates that is it 100% the best model, AICc also tells us this 
+```
+
+## Model summary
+
+```{r summaries}
+# model object
+salmad3
+
+# summary 
+summary(salmad3)
+#cover is not a sig predictors of salamander count 
+#the amount of salamanders found on a mined mountain is less than an unmined mountain
+
+# confidence intervals
+confint(salmad3)
+
+# adjusted R2
+#variance in response explained by the variance in the predictors (r2m)
+r.squaredGLMM(salmad3) #only need to look at the delta (43%-- faily low bc we are only using 3 predictors)
+```
+
+```{r}
+# model object in table
+salmad3 %>% 
+  as_flextable()
+
+#alternatively 
+tidy(salmad3) %>% 
+  flextable()
+```
+
+
+## Visualizing:
+
+```{r visualization}
+#| fig.width: 12
+#| fig.height: 10
+#| out.width: 90%
+#| fig.align: center
+
+plot(ggpredict(salmad3, terms= c("cover", "mined")), add.data = TRUE)
+#point represent the raw data (there is a jitter applied to them)
+#more salamanders on unmined mountaintops as opposed to mined mountaintops 
+
+#included spp here because spp also is a predictor in cover in addition to mind
+plot(ggpredict(salmad3, terms= c("cover", "mined", "spp")), add.data = TRUE)
+```
+
